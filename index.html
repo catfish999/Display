@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>廚房訂單顯示</title>
+    <style>
+        body { font-family: Arial; }
+        .order { border: 1px solid #000; padding: 10px; margin: 10px; background: lightyellow; transition: 0.3s; }
+        .completed-item { text-decoration: line-through; color: gray; }
+        .completedorder { opacity: 0.5; }
+        #pendingOrders, #completedOrders { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h2>即時訂單</h2>
+    <button id="syncorders">更新訂單</button>
+
+    <h3>待完成</h3>
+    <ul id="item-counts"></ul>
+
+    <div id="pendingOrders">
+        <h3>未完成訂單</h3>
+        <div id="pending-list"></div>
+    </div>
+
+    <div id="completedOrders">
+        <h3>已完成訂單</h3>
+        <div id="completed-list"></div>
+    </div>
+
+    <script>
+        const API_URL = "https://script.google.com/macros/s/AKfycby66Rk0xjKybpUno8AbIhfVvHyriChiipxG6ccjtMC1j6Ybhc1y2meqltUL6gBIBVc/exec";
+        let orders = [];
+        let itemCounts = {};
+
+        async function fetchOrder() {
+            try {
+                console.log("📡 正在請求 API...");
+                const response = await fetch(API_URL);
+                if (!response.ok) throw new Error("API 回應錯誤");
+                const newOrders = await response.json();
+
+                const cleanedOrders = JSON.parse(JSON.stringify(newOrders));
+
+                orders = cleanedOrders.map(newOrder => {
+                    const existingOrder = orders.find(o => o.orderId === newOrder.orderId);
+                    if (existingOrder) {
+                        // 保留已完成狀態
+                        newOrder.items.forEach((item, index) => {
+                            const existingItem = existingOrder.items[index];
+                            if (existingItem && existingItem.completed) {
+                                item.completed = true;
+                            }
+                        });
+                    }
+                    return newOrder;
+                });
+
+                renderOrders();
+                updateItemCounts();
+            } catch (error) {
+                console.error("❌ 讀取 API 失敗:", error);
+            }
+        }
+
+        function renderOrders() {
+            document.getElementById("pending-list").innerHTML = "";
+            document.getElementById("completed-list").innerHTML = "";
+
+            orders.forEach(order => addOrder(order));
+        }
+
+        function addOrder(order) {
+            const div = document.createElement("div");
+            div.className = "order";
+            div.dataset.orderId = order.orderId;
+
+            let itemsHtml = `<strong>桌號：${order.table} 訂單編號：${order.orderId}</strong><br>`;
+            order.items.forEach((item, index) => {
+                const itemClass = item.completed ? "completed-item" : "";
+                itemsHtml += `
+                    <p id="order-${order.orderId}-item-${index}" class="${itemClass}">
+                        ${item.name} x ${item.quantity}
+                        <button class="complete-btn" data-order-id="${order.orderId}" data-index="${index}" ${item.completed ? "disabled" : ""}>
+                            完成
+                        </button>
+                    </p>`;
+            });
+
+            div.innerHTML = itemsHtml;
+            if (order.items.every(item => item.completed)) {
+                document.getElementById("completed-list").appendChild(div);
+            } else {
+                document.getElementById("pending-list").appendChild(div);
+            }
+        }
+
+        function markItemComplete(orderId, itemIndex) {
+            orderId = parseInt(orderId, 10);
+            itemIndex = parseInt(itemIndex, 10);
+
+            console.log(`📌 標記完成：訂單 ${orderId}，品項索引 ${itemIndex}`);
+
+            const order = orders.find(o => o.orderId === orderId);
+            if (!order) return console.error(`❌ 找不到訂單 ${orderId}`);
+
+            const item = order.items[itemIndex];
+            if (!item) return console.error(`❌ 找不到品項索引 ${itemIndex}，訂單 ${orderId}`);
+
+            item.completed = true;
+            console.log(`✅ 已標記完成:`, item);
+
+            const itemElement = document.getElementById(`order-${orderId}-item-${itemIndex}`);
+            if (itemElement) {
+                itemElement.classList.add("completed-item");
+                const button = itemElement.querySelector("button");
+                if (button) button.disabled = true;
+            } else {
+                console.error("❌ 找不到對應的項目元素！");
+            }
+
+            updateItemCounts();
+            checkOrderCompletion(orderId);
+        }
+
+        function updateItemCounts() {
+            itemCounts = {};
+            orders.forEach(order => {
+                order.items.forEach(item => {
+                    if (!item.completed) {
+                        itemCounts[item.name] = (itemCounts[item.name] || 0) + item.quantity;
+                    }
+                });
+            });
+
+            const itemCountsDiv = document.getElementById("item-counts");
+            itemCountsDiv.innerHTML = "";
+            for (const [item, count] of Object.entries(itemCounts)) {
+                const li = document.createElement("li");
+                li.textContent = `${item}：${count} 份`;
+                itemCountsDiv.appendChild(li);
+            }
+        }
+
+        function checkOrderCompletion(orderId) {
+            const order = orders.find(o => o.orderId === orderId);
+            if (!order) return;
+
+            if (order.items.every(item => item.completed)) {
+                moveOrderToCompleted(orderId);
+            }
+        }
+
+        function moveOrderToCompleted(orderId) {
+            const orderDiv = document.querySelector(`.order[data-order-id='${orderId}']`);
+            if (!orderDiv) return;
+
+            orderDiv.classList.add("completedorder");
+            document.getElementById("completed-list").appendChild(orderDiv);
+        }
+
+        document.getElementById("syncorders").addEventListener("click", fetchOrder);
+        document.addEventListener("click", function (event) {
+            if (event.target.classList.contains("complete-btn")) {
+                try {
+                    console.log("🛠 按鈕點擊:", event.target);
+
+                    // 確保 dataset 可序列化
+                    const datasetClone = JSON.parse(JSON.stringify(event.target.dataset));
+                    console.log("✅ 按鈕 dataset:", datasetClone);
+
+                    const orderId = parseInt(event.target.dataset.orderId, 10);
+                    const itemIndex = parseInt(event.target.dataset.index, 10);
+                    markItemComplete(orderId, itemIndex);
+                } catch (e) {
+                    console.error("❌ 無法克隆 dataset:", e);
+                }
+            }
+        });
+
+        setInterval(fetchOrder, 5000);
+        fetchOrder();
+    </script>
+</body>
+</html>
