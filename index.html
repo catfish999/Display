@@ -43,6 +43,19 @@
 
                 console.log("✅ API 回應:", newOrders);
 
+                // 建立新的訂單 ID 清單
+                const newOrderIds = newOrders.map(order => order.orderId);
+
+                // **刪除 localStorage 中已被移除的訂單**
+                Object.keys(completedItems).forEach(key => {
+                    const [orderId] = key.split("-");
+                    if (!newOrderIds.includes(parseInt(orderId, 10))) {
+                        delete completedItems[key]; // 從記錄中刪除
+                    }
+                });
+                localStorage.setItem("completedItems", JSON.stringify(completedItems));
+
+                // 更新訂單陣列
                 orders = newOrders.map(order => {
                     order.items.forEach((item, index) => {
                         const itemKey = `${order.orderId}-${index}`;
